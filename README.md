@@ -11,7 +11,11 @@ Aplicação estática para consulta do ranking e administração de importaçõe
 
 1. No SQL Editor do Supabase, execute `supabase/schema.sql`.
 2. Para desenvolvimento local, copie `site/config.example.js` para `site/config.js` e preencha a URL e a chave `anon public`.
-3. Para publicar, informe `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY` ao comando de build. Elas geram `dist/config.js`, que não é versionado.
+3. A aplicação já está ligada ao projeto informado. Caso a chave seja substituída no futuro, defina `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY` no ambiente da hospedagem para sobrescrever a configuração.
+
+## Vercel
+
+O `vercel.json` define `dist` como diretório de saída. Basta fazer novo deploy após o push.
 
 O modelo de planilha precisa conter `id_da_pessoa_entregadora`, `pessoa_entregadora` e `numero_de_pedidos_aceitos_e_concluidos`. As demais colunas do modelo são preservadas no campo `payload`.
 
