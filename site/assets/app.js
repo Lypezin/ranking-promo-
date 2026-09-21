@@ -26,6 +26,15 @@
     return request("rpc/refresh_ranking_cache", { method: "POST", body: {} }).catch(function () {});
   }
 
+  async function loadAllEliteRows() {
+    const rows = [];
+    for (let offset = 0; ; offset += 1000) {
+      const page = await request(table.elite, { query: { select: "courier_id", order: "courier_id", limit: "1000", offset: String(offset) } });
+      rows.push.apply(rows, page);
+      if (page.length < 1000) return rows;
+    }
+  }
+
   function ensureEliteSnapshotReady() {
     return request(table.records, { query: { select: "score_multiplier", limit: "1" } }).catch(function () {
       throw new Error("A atualização de segurança do banco ainda não foi aplicada. Não apague a lista Elite antes de executar a migração 002.");
@@ -108,15 +117,15 @@
   function setupAdmin() {
     const file = document.getElementById("excel-file"), fileName = document.getElementById("file-name"), importButton = document.getElementById("import-button"), importStatus = document.getElementById("import-status"), eliteArea = document.getElementById("elite-ids"), eliteButton = document.getElementById("save-elite-button"), deleteEliteButton = document.getElementById("delete-elite-button"), eliteStatus = document.getElementById("elite-status");
     file.addEventListener("change", function () { fileName.textContent = file.files[0] ? file.files[0].name : "Nenhum arquivo selecionado"; });
-    request(table.elite, { query: { select: "courier_id", order: "courier_id" } }).then(function (rows) { eliteArea.value = rows.map(function (row) { return row.courier_id; }).join("\n"); }).catch(function () {});
+    loadAllEliteRows().then(function (rows) { eliteArea.value = rows.map(function (row) { return row.courier_id; }).join("\n"); }).catch(function () {});
 
     eliteButton.addEventListener("click", async function () {
       const ids = Array.from(new Set(eliteArea.value.split(/[\s,;]+/).map(function (id) { return id.trim(); }).filter(Boolean)));
       if (!ids.length) { setStatus(eliteStatus, "Cole pelo menos um ID Elite.", "error"); return; }
       eliteButton.disabled = true; setStatus(eliteStatus, "Salvando lista…");
       try {
-        await request(table.elite, { method: "POST", query: { on_conflict: "courier_id" }, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: ids.map(function (courier_id) { return { courier_id: courier_id }; }) });
-        await refreshRanking(); setStatus(eliteStatus, ids.length + " ID(s) Elite salvo(s).", "success");
+        const updated = await request("rpc/save_elite_couriers", { method: "POST", body: { p_ids: ids } });
+        setStatus(eliteStatus, ids.length + " ID(s) Elite salvo(s). " + Number(updated || 0) + " registro(s) receberam o bônus.", "success");
       } catch (error) { setStatus(eliteStatus, error.message, "error"); } finally { eliteButton.disabled = false; }
     });
 
@@ -125,7 +134,7 @@
       deleteEliteButton.disabled = true; setStatus(eliteStatus, "Apagando lista…");
       try {
         await ensureEliteSnapshotReady();
-        await request(table.elite, { method: "DELETE", query: { courier_id: "not.is.null" } }); eliteArea.value = ""; await refreshRanking();
+        await request("rpc/clear_elite_couriers", { method: "POST", body: {} }); eliteArea.value = "";
         setStatus(eliteStatus, "Lista Elite apagada. Os pontos históricos foram mantidos.", "success");
       } catch (error) { setStatus(eliteStatus, error.message, "error"); } finally { deleteEliteButton.disabled = false; }
     });
@@ -142,7 +151,7 @@
         const absent = required.filter(function (column) { return !Object.prototype.hasOwnProperty.call(rows[0], column); });
         if (absent.length) throw new Error("Colunas obrigatórias ausentes: " + absent.join(", ") + ".");
         await ensureEliteSnapshotReady();
-        const eliteRows = await request(table.elite, { query: { select: "courier_id" } });
+        const eliteRows = await loadAllEliteRows();
         const eliteIds = new Set(eliteRows.map(function (row) { return String(row.courier_id); }));
         const records = rows.map(function (row) {
           const courierId = String(row.id_da_pessoa_entregadora || "").trim();
