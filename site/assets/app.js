@@ -64,5 +64,12 @@
       } catch (error) { setStatus(importStatus, error.message, "error"); } finally { importButton.disabled = false; }
     });
   }
-  if (document.body.dataset.page === "ranking") setupRanking(); else setupAdmin();
+  function setupAdminGate() {
+    const lock = document.getElementById("admin-lock"), content = document.getElementById("admin-content"), form = document.getElementById("admin-login"), password = document.getElementById("admin-password"), status = document.getElementById("login-status");
+    function unlock() { lock.hidden = true; content.hidden = false; setupAdmin(); }
+    if (sessionStorage.getItem("ranking-admin") === "ok") { unlock(); return; }
+    form.addEventListener("submit", function (event) { event.preventDefault(); if (password.value === "3296") { sessionStorage.setItem("ranking-admin", "ok"); unlock(); } else { password.value = ""; setStatus(status, "Senha incorreta.", "error"); password.focus(); } });
+    password.focus();
+  }
+  if (document.body.dataset.page === "ranking") setupRanking(); else setupAdminGate();
 })();
