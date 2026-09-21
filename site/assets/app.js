@@ -54,7 +54,7 @@
 
     function render(showPodium) {
       podium.innerHTML = showPodium ? ranking.slice(0, 3).map(function (person, index) {
-        return '<article class="podium-card p' + (index + 1) + '"><span class="rank">' + (index + 1) + 'º</span><span class="name">' + escapeHtml(person.courier_name) + '</span><span class="points">' + number(person.total_points) + ' <small>pts</small></span><span class="medal">' + ["♛", "●", "◆"][index] + '</span></article>';
+        return '<article class="podium-card p' + (index + 1) + '"><span class="podium-position">' + (index + 1) + '</span><span class="podium-avatar">' + initials(person.courier_name) + '</span><span class="name">' + escapeHtml(person.courier_name) + '</span><span class="points">' + number(person.total_points) + ' <small>pts</small></span></article>';
       }).join("") : "";
       body.innerHTML = visible.map(function (person, index) {
         const position = person.position || (showPodium ? index + 1 : "—");
