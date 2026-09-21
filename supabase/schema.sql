@@ -13,6 +13,7 @@ create table if not exists public.delivery_records (
   period_date date, period_label text, courier_id text not null, courier_name text not null,
   market text, sub_market text,
   accepted_completed_orders numeric not null default 0 check (accepted_completed_orders >= 0),
+  score_multiplier numeric not null default 1 check (score_multiplier in (1, 1.5)),
   payload jsonb not null default '{}'::jsonb, created_at timestamptz not null default now()
 );
 create index if not exists delivery_records_courier_idx on public.delivery_records (courier_id);
@@ -20,10 +21,10 @@ create index if not exists delivery_records_period_idx on public.delivery_record
 create or replace view public.ranking as
 select d.courier_id, max(d.courier_name) as courier_name,
   sum(d.accepted_completed_orders) as total_orders,
-  round(sum(d.accepted_completed_orders * case when e.courier_id is null then 1 else 1.5 end), 1) as total_points,
-  (e.courier_id is not null) as is_elite
+  round(sum(d.accepted_completed_orders * d.score_multiplier), 1) as total_points,
+  bool_or(e.courier_id is not null) as is_elite
 from public.delivery_records d left join public.elite_couriers e on e.courier_id = d.courier_id
-group by d.courier_id, e.courier_id;
+group by d.courier_id;
 alter table public.import_batches enable row level security;
 alter table public.elite_couriers enable row level security;
 alter table public.delivery_records enable row level security;
