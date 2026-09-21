@@ -32,6 +32,12 @@
     });
   }
 
+  function ensureRouteScoringReady() {
+    return request(table.records, { query: { select: "route_multiplier", limit: "1" } }).catch(function () {
+      throw new Error("A regra de pontuação por origem ainda não foi aplicada no banco. Execute a migração 003 antes de importar outra planilha.");
+    });
+  }
+
   const format = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 });
   function number(value) { return format.format(Number(value || 0)); }
   function escapeHtml(value) { return String(value || "").replace(/[&<>'"]/g, function (ch) { return { "&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", "\"":"&quot;" }[ch]; }); }
@@ -137,16 +143,20 @@
       try {
         const workbook = window.XLSX.read(await file.files[0].arrayBuffer(), { type: "array", cellDates: true });
         const rows = window.XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "", raw: true });
-        const required = ["id_da_pessoa_entregadora", "pessoa_entregadora", "numero_de_pedidos_aceitos_e_concluidos"];
+        const required = ["id_da_pessoa_entregadora", "pessoa_entregadora", "sub_praca", "origem", "numero_de_pedidos_aceitos_e_concluidos"];
         if (!rows.length) throw new Error("A primeira aba não contém linhas de dados.");
         const absent = required.filter(function (column) { return !Object.prototype.hasOwnProperty.call(rows[0], column); });
         if (absent.length) throw new Error("Colunas obrigatórias ausentes: " + absent.join(", ") + ".");
+        const conflictingRow = rows.findIndex(function (row) { return String(row.sub_praca || "").trim() && String(row.origem || "").trim(); });
+        if (conflictingRow >= 0) throw new Error("A linha " + (conflictingRow + 2) + " possui sub_praca e origem preenchidas. Corrija a planilha antes de importar.");
         await ensureEliteSnapshotReady();
+        await ensureRouteScoringReady();
         const eliteRows = await request(table.elite, { query: { select: "courier_id" } });
         const eliteIds = new Set(eliteRows.map(function (row) { return String(row.courier_id); }));
         const records = rows.map(function (row) {
           const courierId = String(row.id_da_pessoa_entregadora || "").trim();
-          return { period_date: dateValue(row.data_do_periodo), period_label: String(row.periodo || ""), courier_id: courierId, courier_name: String(row.pessoa_entregadora || "").trim(), market: String(row.praca || "").trim(), sub_market: String(row.sub_praca || "").trim(), accepted_completed_orders: normalizedNumber(row.numero_de_pedidos_aceitos_e_concluidos), score_multiplier: eliteIds.has(courierId) ? 1.5 : 1, payload: row };
+          const origin = String(row.origem || "").trim();
+          return { period_date: dateValue(row.data_do_periodo), period_label: String(row.periodo || ""), courier_id: courierId, courier_name: String(row.pessoa_entregadora || "").trim(), market: String(row.praca || "").trim(), sub_market: String(row.sub_praca || "").trim(), origin: origin || null, accepted_completed_orders: normalizedNumber(row.numero_de_pedidos_aceitos_e_concluidos), route_multiplier: origin ? 2 : 1, score_multiplier: eliteIds.has(courierId) ? 1.5 : 1, payload: row };
         }).filter(function (row) { return row.courier_id && row.courier_name; });
         if (!records.length) throw new Error("Nenhuma linha válida foi encontrada na planilha.");
         setStatus(importStatus, "Criando lote de importação…");
