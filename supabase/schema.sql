@@ -11,21 +11,17 @@ create table if not exists public.delivery_records (
   id uuid primary key default gen_random_uuid(),
   import_batch_id uuid not null references public.import_batches(id) on delete cascade,
   period_date date, period_label text, courier_id text not null, courier_name text not null,
-  market text, sub_market text, origin text,
+  market text, sub_market text,
   accepted_completed_orders numeric not null default 0 check (accepted_completed_orders >= 0),
-  route_multiplier numeric not null default 1 check (route_multiplier in (1, 2)),
   score_multiplier numeric not null default 1 check (score_multiplier in (1, 1.5)),
-  payload jsonb not null default '{}'::jsonb, created_at timestamptz not null default now(),
-  constraint delivery_records_route_source_check check (
-    nullif(btrim(origin), '') is null or nullif(btrim(sub_market), '') is null
-  )
+  payload jsonb not null default '{}'::jsonb, created_at timestamptz not null default now()
 );
 create index if not exists delivery_records_courier_idx on public.delivery_records (courier_id);
 create index if not exists delivery_records_period_idx on public.delivery_records (period_date);
 create or replace view public.ranking as
 select d.courier_id, max(d.courier_name) as courier_name,
   sum(d.accepted_completed_orders) as total_orders,
-  round(sum(d.accepted_completed_orders * d.route_multiplier * d.score_multiplier), 1) as total_points,
+  round(sum(d.accepted_completed_orders * d.score_multiplier), 1) as total_points,
   bool_or(e.courier_id is not null) as is_elite
 from public.delivery_records d left join public.elite_couriers e on e.courier_id = d.courier_id
 group by d.courier_id;
