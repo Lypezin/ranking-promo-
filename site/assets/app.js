@@ -22,15 +22,27 @@
   function setStatus(element, text, kind) { element.textContent = text; element.className = "form-status " + (kind || ""); }
 
   function setupRanking() {
-    const body = document.getElementById("ranking-body"), podium = document.getElementById("podium"), status = document.getElementById("ranking-status"), search = document.getElementById("search-courier"); let ranking = [];
-    function render() {
-      const term = search.value.trim().toLocaleLowerCase("pt-BR"); const visible = ranking.filter(function (person) { return String(person.courier_name || "").toLocaleLowerCase("pt-BR").includes(term); });
-      podium.innerHTML = term ? "" : ranking.slice(0, 3).map(function (person, index) { return '<article class="podium-card ' + (index === 0 ? "first" : "") + '"><span class="rank">' + (index + 1) + "º LUGAR</span><span class=\"name\">" + escapeHtml(person.courier_name) + '</span><span class="points">' + number(person.total_points) + ' pts</span><span class="medal">' + ["♛", "●", "◆"][index] + "</span></article>"; }).join("");
-      body.innerHTML = visible.map(function (person) { return '<tr><td>' + person.position + 'º</td><td><div class="courier-cell"><span class="avatar">' + initials(person.courier_name) + '</span><span>' + escapeHtml(person.courier_name) + (person.is_elite ? '<span class="elite-pill">ELITE</span>' : "") + '</span></div></td><td class="numeric">' + number(person.total_orders) + '</td><td class="numeric point-value">' + number(person.total_points) + " pts</td></tr>"; }).join("");
-      if (!visible.length) body.innerHTML = '<tr><td colspan="4">Nenhum entregador encontrado.</td></tr>';
+    const body = document.getElementById("ranking-body"), podium = document.getElementById("podium"), status = document.getElementById("ranking-status"), search = document.getElementById("search-courier");
+    let ranking = [], visible = [], searchTimer, latestSearch = 0;
+    const baseQuery = { order: "total_points.desc,courier_name.asc" };
+    function loadRows(query) {
+      return request(table.ranking, { query: Object.assign({ select: "courier_id,courier_name,total_orders,total_points,is_elite", limit: "1000" }, baseQuery, query || {}) });
     }
-    request(table.ranking, { query: { select: "courier_id,courier_name,total_orders,total_points,is_elite", order: "total_points.desc,courier_name.asc" } }).then(function (rows) { ranking = rows.map(function (row, index) { row.position = index + 1; return row; }); status.textContent = ranking.length ? ranking.length + " entregadores no ranking" : "Ainda não há dados importados."; render(); }).catch(function (error) { status.textContent = error.message; status.className = "status error"; });
-    search.addEventListener("input", render);
+    function render(showPodium) {
+      podium.innerHTML = showPodium ? ranking.slice(0, 3).map(function (person, index) { return '<article class="podium-card p' + (index + 1) + '"><span class="rank">' + (index + 1) + "º</span><span class=\"name\">" + escapeHtml(person.courier_name) + '</span><span class="points">' + number(person.total_points) + ' <small>pts</small></span><span class="medal">' + ["♛", "●", "◆"][index] + "</span></article>"; }).join("") : "";
+      body.innerHTML = visible.map(function (person, index) { const position = person.position || (showPodium ? index + 1 : "—"); return '<tr><td class="rank-cell">' + position + (position === "—" ? "" : "º") + '</td><td><div class="courier-cell"><span class="avatar">' + initials(person.courier_name) + '</span><span>' + escapeHtml(person.courier_name) + (person.is_elite ? '<span class="elite-pill">ELITE</span>' : "") + '</span></div></td><td class="numeric orders">' + number(person.total_orders) + '</td><td class="numeric point-value">' + number(person.total_points) + " pts</td></tr>"; }).join("");
+      if (!visible.length) body.innerHTML = '<tr><td colspan="4" class="empty-row">Nenhum entregador encontrado.</td></tr>';
+    }
+    loadRows().then(function (rows) { ranking = rows.map(function (row, index) { row.position = index + 1; return row; }); visible = ranking; status.textContent = ranking.length ? "Classificação atual" : "Ainda não há dados importados."; render(true); }).catch(function (error) { status.textContent = error.message; status.className = "status error"; });
+    search.addEventListener("input", function () {
+      const term = search.value.trim(); clearTimeout(searchTimer);
+      if (!term) { visible = ranking; status.textContent = ranking.length ? "Classificação atual" : "Ainda não há dados importados."; render(true); return; }
+      const requestId = ++latestSearch; status.textContent = "Buscando…";
+      searchTimer = setTimeout(function () {
+        const safeTerm = term.replace(/[*,.()]/g, "");
+        loadRows({ courier_name: "ilike.*" + safeTerm + "*", limit: "100" }).then(function (rows) { if (requestId !== latestSearch) return; visible = rows; status.textContent = rows.length ? rows.length + " resultado(s)" : "Nenhum resultado"; render(false); }).catch(function (error) { if (requestId !== latestSearch) return; status.textContent = error.message; status.className = "status error"; });
+      }, 250);
+    });
   }
 
   function dateValue(value) {
@@ -48,7 +60,7 @@
     request(table.elite, { query: { select: "courier_id", order: "courier_id" } }).then(function (rows) { eliteArea.value = rows.map(function (row) { return row.courier_id; }).join("\n"); }).catch(function () {});
     eliteButton.addEventListener("click", async function () {
       const ids = Array.from(new Set(eliteArea.value.split(/[\s,;]+/).map(function (id) { return id.trim(); }).filter(Boolean))); eliteButton.disabled = true; setStatus(eliteStatus, "Salvando lista…");
-      try { await request(table.elite, { method: "DELETE" }); if (ids.length) await request(table.elite, { method: "POST", headers: { Prefer: "return=minimal" }, body: ids.map(function (courier_id) { return { courier_id: courier_id }; }) }); setStatus(eliteStatus, ids.length + " ID(s) Elite salvo(s). O ranking será recalculado automaticamente.", "success"); } catch (error) { setStatus(eliteStatus, error.message, "error"); } finally { eliteButton.disabled = false; }
+      try { await request(table.elite, { method: "DELETE", query: { courier_id: "not.is.null" } }); if (ids.length) await request(table.elite, { method: "POST", headers: { Prefer: "return=minimal" }, body: ids.map(function (courier_id) { return { courier_id: courier_id }; }) }); setStatus(eliteStatus, ids.length + " ID(s) Elite salvo(s). O ranking será recalculado automaticamente.", "success"); } catch (error) { setStatus(eliteStatus, error.message, "error"); } finally { eliteButton.disabled = false; }
     });
     importButton.addEventListener("click", async function () {
       if (!file.files[0]) { setStatus(importStatus, "Selecione uma planilha Excel antes de importar.", "error"); return; }
