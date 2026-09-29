@@ -23,7 +23,7 @@
   }
 
   function refreshRanking() {
-    return request("rpc/refresh_ranking_cache", { method: "POST", body: {} }).catch(function () {});
+    return request("rpc/refresh_ranking_cache", { method: "POST", body: {} });
   }
 
   async function loadAllEliteRows() {
@@ -115,9 +115,20 @@
   function normalizedNumber(value) { if (typeof value === "number") return value; return Number(String(value || "0").replace(/\./g, "").replace(",", ".")) || 0; }
 
   function setupAdmin() {
-    const file = document.getElementById("excel-file"), fileName = document.getElementById("file-name"), importButton = document.getElementById("import-button"), importStatus = document.getElementById("import-status"), eliteArea = document.getElementById("elite-ids"), eliteButton = document.getElementById("save-elite-button"), deleteEliteButton = document.getElementById("delete-elite-button"), eliteStatus = document.getElementById("elite-status");
+    const file = document.getElementById("excel-file"), fileName = document.getElementById("file-name"), importButton = document.getElementById("import-button"), refreshButton = document.getElementById("refresh-ranking-button"), importStatus = document.getElementById("import-status"), eliteArea = document.getElementById("elite-ids"), eliteButton = document.getElementById("save-elite-button"), deleteEliteButton = document.getElementById("delete-elite-button"), eliteStatus = document.getElementById("elite-status");
     file.addEventListener("change", function () { fileName.textContent = file.files[0] ? file.files[0].name : "Nenhum arquivo selecionado"; });
     loadAllEliteRows().then(function (rows) { eliteArea.value = rows.map(function (row) { return row.courier_id; }).join("\n"); }).catch(function () {});
+
+    refreshButton.addEventListener("click", async function () {
+      refreshButton.disabled = true; setStatus(importStatus, "Atualizando ranking…");
+      try {
+        await refreshRanking();
+        refreshButton.hidden = true;
+        setStatus(importStatus, "Ranking atualizado.", "success");
+      } catch (error) {
+        setStatus(importStatus, "Não foi possível atualizar o ranking: " + error.message, "error");
+      } finally { refreshButton.disabled = false; }
+    });
 
     eliteButton.addEventListener("click", async function () {
       const ids = Array.from(new Set(eliteArea.value.split(/[\s,;]+/).map(function (id) { return id.trim(); }).filter(Boolean)));
@@ -142,7 +153,8 @@
     importButton.addEventListener("click", async function () {
       if (!file.files[0]) { setStatus(importStatus, "Selecione uma planilha Excel antes de importar.", "error"); return; }
       if (!window.XLSX) { setStatus(importStatus, "Não foi possível carregar o leitor de Excel. Tente novamente.", "error"); return; }
-      importButton.disabled = true; setStatus(importStatus, "Lendo a planilha…");
+      importButton.disabled = true; refreshButton.hidden = true; setStatus(importStatus, "Lendo a planilha…");
+      let batchId = null, uploadedRecords = 0, totalRecords = 0;
       try {
         const workbook = window.XLSX.read(await file.files[0].arrayBuffer(), { type: "array", cellDates: true });
         const rows = window.XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "", raw: true });
@@ -158,19 +170,28 @@
           return { period_date: dateValue(row.data_do_periodo), period_label: String(row.periodo || ""), courier_id: courierId, courier_name: String(row.pessoa_entregadora || "").trim(), market: String(row.praca || "").trim(), sub_market: String(row.sub_praca || "").trim(), accepted_completed_orders: normalizedNumber(row.numero_de_pedidos_aceitos_e_concluidos), score_multiplier: eliteIds.has(courierId) ? 1.5 : 1, payload: row };
         }).filter(function (row) { return row.courier_id && row.courier_name; });
         if (!records.length) throw new Error("Nenhuma linha válida foi encontrada na planilha.");
+        totalRecords = records.length;
         setStatus(importStatus, "Criando lote de importação…");
         const dates = records.map(function (record) { return record.period_date; }).filter(Boolean).sort();
         const batch = await request(table.batches, { method: "POST", headers: { Prefer: "return=representation" }, body: { file_name: file.files[0].name, row_count: records.length, period_start: dates[0] || null, period_end: dates[dates.length - 1] || null } });
-        const batchId = batch[0] && batch[0].id;
+        batchId = batch[0] && batch[0].id;
         if (!batchId) throw new Error("O Supabase não retornou o identificador do lote.");
         for (let start = 0; start < records.length; start += 500) {
           const part = records.slice(start, start + 500).map(function (record) { return Object.assign({}, record, { import_batch_id: batchId }); });
           setStatus(importStatus, "Enviando " + Math.min(start + 500, records.length) + " de " + records.length + " linhas…");
           await request(table.records, { method: "POST", headers: { Prefer: "return=minimal" }, body: part });
+          uploadedRecords += part.length;
         }
         setStatus(importStatus, "Atualizando ranking…"); await refreshRanking();
         setStatus(importStatus, records.length + " linhas importadas com sucesso.", "success");
-      } catch (error) { setStatus(importStatus, error.message, "error"); } finally { importButton.disabled = false; }
+      } catch (error) {
+        if (totalRecords > 0 && uploadedRecords === totalRecords) {
+          setStatus(importStatus, "As " + totalRecords + " linhas foram gravadas, mas o ranking não foi atualizado. Não reimporte a planilha; tente atualizar o ranking.", "error");
+          refreshButton.hidden = false;
+        } else if (uploadedRecords > 0 || batchId) {
+          setStatus(importStatus, "A importação pode ter ficado parcial (" + uploadedRecords + " de " + totalRecords + " linhas confirmadas). Não reimporte a mesma planilha; verifique o lote antes.", "error");
+        } else { setStatus(importStatus, error.message, "error"); }
+      } finally { importButton.disabled = false; }
     });
   }
 
