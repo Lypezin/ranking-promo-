@@ -112,12 +112,40 @@
     const br = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/); if (br) return [br[3].length === 2 ? "20" + br[3] : br[3], br[2].padStart(2, "0"), br[1].padStart(2, "0")].join("-");
     const parsed = new Date(text); return Number.isNaN(parsed.valueOf()) ? null : parsed.toISOString().slice(0, 10);
   }
+  function displayDate(value) {
+    const parts = String(value || "").split("-");
+    return parts.length === 3 ? parts[2] + "/" + parts[1] + "/" + parts[0] : "";
+  }
+  function nextDate(value) {
+    const parts = String(value || "").split("-").map(Number);
+    if (parts.length !== 3 || parts.some(function (part) { return !Number.isFinite(part); })) return "";
+    const next = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + 1));
+    return displayDate(next.toISOString().slice(0, 10));
+  }
   function normalizedNumber(value) { if (typeof value === "number") return value; return Number(String(value || "0").replace(/\./g, "").replace(",", ".")) || 0; }
 
   function setupAdmin() {
-    const file = document.getElementById("excel-file"), fileName = document.getElementById("file-name"), importButton = document.getElementById("import-button"), refreshButton = document.getElementById("refresh-ranking-button"), importStatus = document.getElementById("import-status"), eliteArea = document.getElementById("elite-ids"), eliteButton = document.getElementById("save-elite-button"), deleteEliteButton = document.getElementById("delete-elite-button"), eliteStatus = document.getElementById("elite-status");
+    const file = document.getElementById("excel-file"), fileName = document.getElementById("file-name"), latestPeriodStatus = document.getElementById("latest-period-status"), importButton = document.getElementById("import-button"), refreshButton = document.getElementById("refresh-ranking-button"), importStatus = document.getElementById("import-status"), eliteArea = document.getElementById("elite-ids"), eliteButton = document.getElementById("save-elite-button"), deleteEliteButton = document.getElementById("delete-elite-button"), eliteStatus = document.getElementById("elite-status");
     file.addEventListener("change", function () { fileName.textContent = file.files[0] ? file.files[0].name : "Nenhum arquivo selecionado"; });
     loadAllEliteRows().then(function (rows) { eliteArea.value = rows.map(function (row) { return row.courier_id; }).join("\n"); }).catch(function () {});
+
+    async function loadLatestPeriod() {
+      latestPeriodStatus.textContent = "Consultando última data do banco…";
+      latestPeriodStatus.className = "latest-period";
+      try {
+        const rows = await request(table.records, { query: { select: "period_date", period_date: "not.is.null", order: "period_date.desc", limit: "1" } });
+        if (!rows.length || !rows[0].period_date) {
+          latestPeriodStatus.textContent = "Ainda não há datas de operação importadas.";
+          return;
+        }
+        const latest = rows[0].period_date;
+        latestPeriodStatus.textContent = "Última data no banco: " + displayDate(latest) + " · Próxima importação: a partir de " + nextDate(latest);
+      } catch (_) {
+        latestPeriodStatus.textContent = "Não foi possível consultar a última data. Atualize a página para tentar novamente.";
+        latestPeriodStatus.className = "latest-period error";
+      }
+    }
+    loadLatestPeriod();
 
     refreshButton.addEventListener("click", async function () {
       refreshButton.disabled = true; setStatus(importStatus, "Atualizando ranking…");
@@ -182,6 +210,7 @@
           await request(table.records, { method: "POST", headers: { Prefer: "return=minimal" }, body: part });
           uploadedRecords += part.length;
         }
+        await loadLatestPeriod();
         setStatus(importStatus, "Atualizando ranking…"); await refreshRanking();
         setStatus(importStatus, records.length + " linhas importadas com sucesso.", "success");
       } catch (error) {

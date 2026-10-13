@@ -118,6 +118,8 @@ td { min-width: 0; padding: 11px 8px; border: 0; font-size: .84rem; font-weight:
 .file-drop input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .file-title { font-weight: 850; }
 .file-name { max-width: 100%; margin-top: 7px; overflow: hidden; color: var(--muted); font-size: .76rem; text-overflow: ellipsis; white-space: nowrap; }
+.latest-period { margin: 20px 0 -7px; padding: 12px 14px; border: 1px solid #25425a; border-radius: 14px; background: #08121d; color: #b8dcf3; font-size: .78rem; font-weight: 750; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.latest-period.error { border-color: #743a46; color: #ff9ca8; }
 .elite-card textarea, .login-card input { display: block; width: 100%; min-height: 176px; resize: vertical; margin: 24px 0 14px; padding: 14px; border: 1px solid #30465c; border-radius: 16px; outline: 0; background: #050a10; color: var(--ink); line-height: 1.45; text-align: left; }
 .login-card input { min-height: 51px; resize: none; margin: 22px 0 14px; text-align: center; }
 .elite-card textarea:focus, .login-card input:focus { border-color: var(--blue); box-shadow: 0 0 0 4px #55c2ff14; }
