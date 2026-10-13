@@ -151,10 +151,12 @@
       refreshButton.disabled = true; setStatus(importStatus, "Atualizando ranking…");
       try {
         await refreshRanking();
-        refreshButton.hidden = true;
         setStatus(importStatus, "Ranking atualizado.", "success");
       } catch (error) {
-        setStatus(importStatus, "Não foi possível atualizar o ranking: " + error.message, "error");
+        const timeout = /statement timeout/i.test(error.message);
+        setStatus(importStatus, timeout
+          ? "O Supabase cancelou o recálculo por tempo limite. Não reimporte a planilha; aplique a migração de timeout no banco e tente novamente."
+          : "Não foi possível atualizar o ranking: " + error.message, "error");
       } finally { refreshButton.disabled = false; }
     });
 
@@ -181,7 +183,7 @@
     importButton.addEventListener("click", async function () {
       if (!file.files[0]) { setStatus(importStatus, "Selecione uma planilha Excel antes de importar.", "error"); return; }
       if (!window.XLSX) { setStatus(importStatus, "Não foi possível carregar o leitor de Excel. Tente novamente.", "error"); return; }
-      importButton.disabled = true; refreshButton.hidden = true; setStatus(importStatus, "Lendo a planilha…");
+      importButton.disabled = true; refreshButton.disabled = true; setStatus(importStatus, "Lendo a planilha…");
       let batchId = null, uploadedRecords = 0, totalRecords = 0;
       try {
         const workbook = window.XLSX.read(await file.files[0].arrayBuffer(), { type: "array", cellDates: true });
@@ -216,11 +218,10 @@
       } catch (error) {
         if (totalRecords > 0 && uploadedRecords === totalRecords) {
           setStatus(importStatus, "As " + totalRecords + " linhas foram gravadas, mas o ranking não foi atualizado. Não reimporte a planilha; tente atualizar o ranking.", "error");
-          refreshButton.hidden = false;
         } else if (uploadedRecords > 0 || batchId) {
           setStatus(importStatus, "A importação pode ter ficado parcial (" + uploadedRecords + " de " + totalRecords + " linhas confirmadas). Não reimporte a mesma planilha; verifique o lote antes.", "error");
         } else { setStatus(importStatus, error.message, "error"); }
-      } finally { importButton.disabled = false; }
+      } finally { importButton.disabled = false; refreshButton.disabled = false; }
     });
   }
 
