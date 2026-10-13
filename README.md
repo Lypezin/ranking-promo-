@@ -12,8 +12,9 @@ Aplicação estática para consulta do ranking e administração de importaçõe
 1. No SQL Editor do Supabase, execute `supabase/schema.sql` e depois os arquivos de `supabase/migrations/` em ordem.
 2. Em um banco que já possui dados, execute `002_ranking_cache_and_elite_snapshot.sql` **antes** de apagar a lista Elite atual. A migração preserva o multiplicador histórico e cria o cache e os índices do ranking.
 3. Execute `003_elite_cycle_fix.sql` para aplicar o bônus quando a lista Elite for salva depois da importação e controlar a troca mensal sem remover pontos históricos.
-4. Para desenvolvimento local, copie `site/config.example.js` para `site/config.js` e preencha a URL e a chave `anon public`.
-5. A aplicação já está ligada ao projeto informado. Caso a chave seja substituída no futuro, defina `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY` no ambiente da hospedagem para sobrescrever a configuração.
+4. Execute `20261013193324_increase_ranking_cache_timeout.sql` para aumentar o limite apenas do recálculo do ranking para 45 segundos e agregar os registros antes de consultar a lista Elite. Depois, clique em **Atualizar ranking** no admin; não reimporte a planilha.
+5. Para desenvolvimento local, copie `site/config.example.js` para `site/config.js` e preencha a URL e a chave `anon public`.
+6. A aplicação já está ligada ao projeto informado. Caso a chave seja substituída no futuro, defina `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY` no ambiente da hospedagem para sobrescrever a configuração.
 
 ## Troca mensal da lista Elite
 
