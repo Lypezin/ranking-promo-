@@ -17,9 +17,41 @@
       const text = await response.text();
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch (_) { data = null; }
-      if (!response.ok) throw new Error(data && (data.message || data.hint) ? data.message || data.hint : "Não foi possível concluir a operação.");
+      if (!response.ok) {
+        const error = new Error(data && (data.message || data.hint) ? data.message || data.hint : "Não foi possível concluir a operação.");
+        error.status = response.status;
+        error.code = data && data.code;
+        throw error;
+      }
       return data;
     });
+  }
+
+  function createUuid() {
+    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+    if (!window.crypto || !window.crypto.getRandomValues) throw new Error("Este navegador não permite gerar identificadores seguros para importar.");
+    const bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, function (byte) { return byte.toString(16).padStart(2, "0"); }).join("");
+    return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20);
+  }
+
+  function wait(milliseconds) { return new Promise(function (resolve) { window.setTimeout(resolve, milliseconds); }); }
+
+  async function requestWithRetry(resource, options, onRetry) {
+    const retries = 3;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await request(resource, options);
+      } catch (error) {
+        const retryable = error.name === "TypeError" || error.code === "57014" || error.status === 408 || error.status === 429 || error.status >= 500;
+        if (!retryable || attempt >= retries) throw error;
+        if (onRetry) onRetry(attempt + 1, error);
+        await wait(500 * Math.pow(2, attempt));
+      }
+    }
   }
 
   function refreshRanking() {
@@ -201,15 +233,25 @@
         }).filter(function (row) { return row.courier_id && row.courier_name; });
         if (!records.length) throw new Error("Nenhuma linha válida foi encontrada na planilha.");
         totalRecords = records.length;
+        records.forEach(function (record) { record.id = createUuid(); });
         setStatus(importStatus, "Criando lote de importação…");
         const dates = records.map(function (record) { return record.period_date; }).filter(Boolean).sort();
         const batch = await request(table.batches, { method: "POST", headers: { Prefer: "return=representation" }, body: { file_name: file.files[0].name, row_count: records.length, period_start: dates[0] || null, period_end: dates[dates.length - 1] || null } });
         batchId = batch[0] && batch[0].id;
         if (!batchId) throw new Error("O Supabase não retornou o identificador do lote.");
-        for (let start = 0; start < records.length; start += 500) {
-          const part = records.slice(start, start + 500).map(function (record) { return Object.assign({}, record, { import_batch_id: batchId }); });
-          setStatus(importStatus, "Enviando " + Math.min(start + 500, records.length) + " de " + records.length + " linhas…");
-          await request(table.records, { method: "POST", headers: { Prefer: "return=minimal" }, body: part });
+        const chunkSize = 100;
+        for (let start = 0; start < records.length; start += chunkSize) {
+          const part = records.slice(start, start + chunkSize).map(function (record) { return Object.assign({}, record, { import_batch_id: batchId }); });
+          const chunkEnd = Math.min(start + part.length, records.length);
+          setStatus(importStatus, "Enviando " + chunkEnd + " de " + records.length + " linhas…");
+          await requestWithRetry(table.records, {
+            method: "POST",
+            query: { on_conflict: "id" },
+            headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+            body: part
+          }, function (attempt) {
+            setStatus(importStatus, "Falha temporária no bloco " + (start + 1) + "–" + chunkEnd + ". Tentando novamente (" + attempt + "/3)…");
+          });
           uploadedRecords += part.length;
         }
         await loadLatestPeriod();
@@ -219,7 +261,8 @@
         if (totalRecords > 0 && uploadedRecords === totalRecords) {
           setStatus(importStatus, "As " + totalRecords + " linhas foram gravadas, mas o ranking não foi atualizado. Não reimporte a planilha; tente atualizar o ranking.", "error");
         } else if (uploadedRecords > 0 || batchId) {
-          setStatus(importStatus, "A importação pode ter ficado parcial (" + uploadedRecords + " de " + totalRecords + " linhas confirmadas). Não reimporte a mesma planilha; verifique o lote antes.", "error");
+          await loadLatestPeriod();
+          setStatus(importStatus, "Importação interrompida: " + uploadedRecords + " de " + totalRecords + " linhas confirmadas. Erro: " + error.message + ". Não reimporte; apague o lote incompleto antes de tentar de novo.", "error");
         } else { setStatus(importStatus, error.message, "error"); }
       } finally { importButton.disabled = false; refreshButton.disabled = false; }
     });
